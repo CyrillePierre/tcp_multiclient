@@ -12,5 +12,8 @@ tokio = { version = "0.3", features = [
 	"net", 
 	"stream",
 	"rt-multi-thread",
+	"sync",
+	"io-util",
+	"io-std",
 ]}
 futures = "0.3"
