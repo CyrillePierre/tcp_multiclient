@@ -1,10 +1,11 @@
+#![feature(get_mut_unchecked)]
 use futures::stream::{self, StreamExt};
-use tokio::{
-    prelude::*,
-    sync::Mutex, 
-    net::{TcpListener, TcpStream},
-};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    prelude::*,
+    sync::Mutex,
+};
 
 type Client = Arc<TcpStream>;
 type ClientMap = HashMap<SocketAddr, Client>;
@@ -36,14 +37,16 @@ impl NetMgr {
             }
         };
 
-        let listeners: Listeners = stream::iter(args)
-            .filter_map(tcp_bind).collect().await;
+        let listeners: Listeners = stream::iter(args).filter_map(tcp_bind).collect().await;
         if listeners.is_empty() {
             eprintln!("No IPv4 or IPv6 bind available.");
             std::process::exit(2);
         }
-        
-        NetMgr{listeners, clients: Arc::new(Mutex::new(ClientMap::new()))}
+
+        NetMgr {
+            listeners,
+            clients: Arc::new(Mutex::new(ClientMap::new())),
+        }
     }
 
     pub fn start_accept(&self) {
@@ -65,22 +68,26 @@ impl NetMgr {
             });
         }
     }
-
 }
 
 pub async fn process_client(clients: Clients, mut client: Client) {
-    let mut buf = [0; 4096];
-    let client = Arc::get_mut(&mut client).unwrap();
-    let addr = &client.local_addr().unwrap();
+    loop {
+        let mut buf = [0; 4096];
+        let client = unsafe { Arc::get_mut_unchecked(&mut client) };
+        let size = client.read(&mut buf).await;
+        if let Err(e) = &size {
+            eprintln!("failed to read: {}", e);
+        }
+        let size = size.unwrap();
+        let addr = &client.local_addr().unwrap();
 
-    let size = client.read(&mut buf).await;
-    if let Err(e) = &size { eprintln!("failed to read: {}", e); }
-    let size = size.unwrap();
-
-    // write the buffer to all other clients
-    for (a, c) in clients.lock().await.iter() {
-        let mut c = Arc::clone(c);
-        let c = Arc::get_mut(&mut c).unwrap();
-        if a != addr { c.write_all(&buf[..size]).await.unwrap(); }
+        // write the buffer to all other clients
+        for (a, c) in clients.lock().await.iter() {
+            let mut c = Arc::clone(c);
+            let c = unsafe { Arc::get_mut_unchecked(&mut c) };
+            if *a != *addr {
+                c.write_all(&buf[..size]).await.unwrap();
+            }
+        }
     }
 }
