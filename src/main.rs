@@ -16,7 +16,8 @@ fn main() {
         // generate TcpListeners from the ports
         let listeners = NetMgr::generate_listeners(args, ip).await;
         listeners.start_accept();
-        stdin().read_u8().await.ok();
+
+//        stdin().read_u8().await.ok();
     });
 }
 

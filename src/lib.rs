@@ -1,20 +1,56 @@
-#![feature(get_mut_unchecked)]
 use futures::stream::{self, StreamExt};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpStream, tcp},
     prelude::*,
     sync::Mutex,
 };
 
-type Client = Arc<TcpStream>;
-type ClientMap = HashMap<SocketAddr, Client>;
+pub struct Client {
+    addr: SocketAddr,
+    r_stream: Mutex<tcp::OwnedReadHalf>,
+    w_stream: Mutex<tcp::OwnedWriteHalf>,
+}
+
+//type Client = Arc<TcpStream>;
+type ClientMap = HashMap<SocketAddr, Arc<Client>>;
 type Clients = Arc<Mutex<ClientMap>>;
 type Listeners = Vec<Arc<TcpListener>>;
 
 pub struct NetMgr {
     listeners: Listeners,
     clients: Clients,
+}
+
+impl Client {
+    pub fn new(addr: SocketAddr, sock: TcpStream) -> Client {
+        let (rs, ws) = sock.into_split();
+        Client{
+            addr, 
+            r_stream: Mutex::new(rs),
+            w_stream: Mutex::new(ws),
+        }
+    }
+
+    pub async fn process(&self, clients: &Clients) {
+        loop {
+            let mut buf = [0u8; 4096];
+            let size = self.r_stream.lock().await.read(&mut buf).await;
+            if let Err(e) = &size {
+                eprintln!("failed to read: {}", e);
+            }
+            let size = size.unwrap();
+            if size == 0 { break; }
+
+            // write the buffer to all other clients
+            for (a, c) in clients.lock().await.iter() {
+                let c = Arc::clone(c);
+                if *a != self.addr {
+                    c.w_stream.lock().await.write_all(&buf[..size]).await.unwrap();
+                }
+            }
+        }
+    }
 }
 
 impl NetMgr {
@@ -54,13 +90,15 @@ impl NetMgr {
             let clients = Arc::clone(&self.clients);
             tokio::spawn(async move {
                 loop {
+                    // accept a new TCP client
                     let (sock, addr) = listener.accept().await.unwrap();
-                    clients.lock().await.insert(addr, Arc::new(sock));
+                    let client = Client::new(addr, sock);
+                    clients.lock().await.insert(addr, Arc::new(client));
 
                     let clients = Arc::clone(&clients);
                     tokio::spawn(async move {
                         let client = Arc::clone(clients.lock().await.get(&addr).unwrap());
-                        process_client(Arc::clone(&clients), client).await;
+                        client.process(&clients).await;
                         let mut clients = clients.lock().await;
                         clients.remove(&addr);
                     });
@@ -70,24 +108,3 @@ impl NetMgr {
     }
 }
 
-pub async fn process_client(clients: Clients, mut client: Client) {
-    loop {
-        let mut buf = [0; 4096];
-        let client = unsafe { Arc::get_mut_unchecked(&mut client) };
-        let size = client.read(&mut buf).await;
-        if let Err(e) = &size {
-            eprintln!("failed to read: {}", e);
-        }
-        let size = size.unwrap();
-        let addr = &client.local_addr().unwrap();
-
-        // write the buffer to all other clients
-        for (a, c) in clients.lock().await.iter() {
-            let mut c = Arc::clone(c);
-            let c = unsafe { Arc::get_mut_unchecked(&mut c) };
-            if *a != *addr {
-                c.write_all(&buf[..size]).await.unwrap();
-            }
-        }
-    }
-}
