@@ -1,5 +1,5 @@
 use tcp_multiclient::*;
-use tokio::{io::stdin, prelude::*, runtime::Runtime};
+use tokio::runtime::Runtime;
 
 fn main() {
     let mut args = std::env::args().peekable();
@@ -15,9 +15,10 @@ fn main() {
     rt.block_on(async move {
         // generate TcpListeners from the ports
         let listeners = NetMgr::generate_listeners(args, ip).await;
-        listeners.start_accept();
+        let handles = listeners.start_accept();
 
-//        stdin().read_u8().await.ok();
+        // wait the server tasks
+        futures::future::join_all(handles).await;
     });
 }
 

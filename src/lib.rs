@@ -1,9 +1,10 @@
 use futures::stream::{self, StreamExt};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{
-    net::{TcpListener, TcpStream, tcp},
+    net::{tcp, TcpListener, TcpStream},
     prelude::*,
     sync::Mutex,
+    task::JoinHandle,
 };
 
 pub struct Client {
@@ -25,8 +26,8 @@ pub struct NetMgr {
 impl Client {
     pub fn new(addr: SocketAddr, sock: TcpStream) -> Client {
         let (rs, ws) = sock.into_split();
-        Client{
-            addr, 
+        Client {
+            addr,
             r_stream: Mutex::new(rs),
             w_stream: Mutex::new(ws),
         }
@@ -40,13 +41,20 @@ impl Client {
                 eprintln!("failed to read: {}", e);
             }
             let size = size.unwrap();
-            if size == 0 { break; }
+            if size == 0 {
+                break;
+            }
 
             // write the buffer to all other clients
             for (a, c) in clients.lock().await.iter() {
                 let c = Arc::clone(c);
                 if *a != self.addr {
-                    c.w_stream.lock().await.write_all(&buf[..size]).await.unwrap();
+                    c.w_stream
+                        .lock()
+                        .await
+                        .write_all(&buf[..size])
+                        .await
+                        .unwrap();
                 }
             }
         }
@@ -85,10 +93,11 @@ impl NetMgr {
         }
     }
 
-    pub fn start_accept(&self) {
+    pub fn start_accept(&self) -> Vec<JoinHandle<()>> {
+        let mut handles = vec![];
         for listener in self.listeners.iter().cloned() {
             let clients = Arc::clone(&self.clients);
-            tokio::spawn(async move {
+            handles.push(tokio::spawn(async move {
                 loop {
                     // accept a new TCP client
                     let (sock, addr) = listener.accept().await.unwrap();
@@ -103,8 +112,8 @@ impl NetMgr {
                         clients.remove(&addr);
                     });
                 }
-            });
+            }));
         }
+        handles
     }
 }
-
