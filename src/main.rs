@@ -23,6 +23,6 @@ fn main() {
 }
 
 fn help(arg0: &str) -> ! {
-    eprintln!("Syntax: {} <port> [<port2> ...]", arg0);
+    eprintln!("Syntax: {} <port> [<port>...]", arg0);
     std::process::exit(1);
 }

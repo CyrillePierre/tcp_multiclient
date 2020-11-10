@@ -3,7 +3,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{
     net::{tcp, TcpListener, TcpStream},
     prelude::*,
-    sync::Mutex,
+    sync::{Mutex, RwLock},
     task::JoinHandle,
 };
 
@@ -13,9 +13,8 @@ pub struct Client {
     w_stream: Mutex<tcp::OwnedWriteHalf>,
 }
 
-//type Client = Arc<TcpStream>;
 type ClientMap = HashMap<SocketAddr, Arc<Client>>;
-type Clients = Arc<Mutex<ClientMap>>;
+type Clients = Arc<RwLock<ClientMap>>;
 type Listeners = Vec<Arc<TcpListener>>;
 
 pub struct NetMgr {
@@ -46,8 +45,7 @@ impl Client {
             }
 
             // write the buffer to all other clients
-            for (a, c) in clients.lock().await.iter() {
-                let c = Arc::clone(c);
+            for (a, c) in clients.read().await.iter() {
                 if *a != self.addr {
                     c.w_stream
                         .lock()
@@ -89,7 +87,7 @@ impl NetMgr {
 
         NetMgr {
             listeners,
-            clients: Arc::new(Mutex::new(ClientMap::new())),
+            clients: Arc::new(RwLock::new(ClientMap::new())),
         }
     }
 
@@ -102,13 +100,16 @@ impl NetMgr {
                     // accept a new TCP client
                     let (sock, addr) = listener.accept().await.unwrap();
                     let client = Client::new(addr, sock);
-                    clients.lock().await.insert(addr, Arc::new(client));
+                    clients.write().await.insert(addr, Arc::new(client));
 
                     let clients = Arc::clone(&clients);
                     tokio::spawn(async move {
-                        let client = Arc::clone(clients.lock().await.get(&addr).unwrap());
+                        // handle the client (read loop)
+                        let client = Arc::clone(clients.read().await.get(&addr).unwrap());
                         client.process(&clients).await;
-                        let mut clients = clients.lock().await;
+
+                        // when process is finished, the client is removed and closed
+                        let mut clients = clients.write().await;
                         clients.remove(&addr);
                     });
                 }
