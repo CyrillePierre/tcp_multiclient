@@ -2,6 +2,8 @@ use tcp_multiclient::*;
 use tokio::runtime::Runtime;
 
 fn main() {
+    config_logger();
+
     let mut args = std::env::args().peekable();
     let prog_name = args
         .next()
@@ -23,6 +25,16 @@ fn main() {
 }
 
 fn help(arg0: &str) -> ! {
-    eprintln!("Syntax: {} <port> [<port>...]", arg0);
+    println!("Syntax: {} <port> [<port>...]", arg0);
     std::process::exit(1);
+}
+
+fn config_logger() {
+    env_logger::builder()
+        .format_timestamp(None)
+        .filter_level(log::LevelFilter::Info)
+        .filter_module("mio::poll", log::LevelFilter::Warn)
+        .format_module_path(false)
+        .parse_default_env()
+        .init();
 }

@@ -1,4 +1,5 @@
 use futures::stream::{self, StreamExt};
+use log::{debug, error, info, trace, warn};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{
     net::{tcp, TcpListener, TcpStream},
@@ -37,9 +38,12 @@ impl Client {
             let mut buf = [0u8; 4096];
             let size = self.r_stream.lock().await.read(&mut buf).await;
             if let Err(e) = &size {
-                eprintln!("failed to read: {}", e);
+                warn!("client {}: failed to read: {}", &self.addr, &e);
             }
             let size = size.unwrap();
+
+            trace!("{}: read ({}) {}", &self.addr, size, format_data(&buf[..size]));
+
             if size == 0 {
                 break;
             }
@@ -65,23 +69,25 @@ impl NetMgr {
         T: Iterator,
         T::Item: std::fmt::Display,
     {
+        // async bloc used to bind the TcpListener to each port
         let tcp_bind = |port| async move {
             let addr = format!("{}:{}", ip, port);
             match TcpListener::bind(&addr).await {
                 Ok(tl) => {
-                    println!("Binding {}", tl.local_addr().unwrap());
+                    info!("Binding {}", tl.local_addr().unwrap());
                     Some(Arc::new(tl))
                 }
                 Err(e) => {
-                    eprintln!("Failed to bind {}: {}", addr, e);
+                    warn!("Failed to bind {}: {}", &addr, &e);
                     None
                 }
             }
         };
 
+        // iterates on all ports (args) and bind a socket to each port
         let listeners: Listeners = stream::iter(args).filter_map(tcp_bind).collect().await;
         if listeners.is_empty() {
-            eprintln!("No IPv4 or IPv6 bind available.");
+            error!("No IPv4 or IPv6 bind available.");
             std::process::exit(2);
         }
 
@@ -102,6 +108,8 @@ impl NetMgr {
                     let client = Client::new(addr, sock);
                     clients.write().await.insert(addr, Arc::new(client));
 
+                    info!("new client: {}", &addr);
+
                     let clients = Arc::clone(&clients);
                     tokio::spawn(async move {
                         // handle the client (read loop)
@@ -111,10 +119,36 @@ impl NetMgr {
                         // when process is finished, the client is removed and closed
                         let mut clients = clients.write().await;
                         clients.remove(&addr);
+
+                        info!("disconnect client: {}", &addr);
                     });
                 }
             }));
         }
         handles
     }
+}
+
+fn format_data(data: &[u8]) -> String {
+    const MAX_WIDTH: usize = 40;
+
+    let mut res = String::new();
+    res.push('"');
+    for c in data {
+        match *c {
+            b'\n' => res.push_str("\\n"),
+            b'\t' => res.push_str("\\t"),
+            b'\r' => res.push_str("\\r"),
+            c if c < b' ' => res.push_str(&format!("\\x{:02x}", c)),
+            c if c.is_ascii() => res.push(c as char),
+            c => res.push_str(&format!("\\x{:02x}", c)),
+        }
+        if res.len() >= MAX_WIDTH { break; }
+    }
+
+    res.push('"');
+    if data.len() > MAX_WIDTH {
+        res.push_str("...");
+    }
+    res
 }

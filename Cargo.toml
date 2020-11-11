@@ -1,6 +1,6 @@
 [package]
 name = "tcp_multiclient"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Cyrille <cypierre58@gmail.com>"]
 edition = "2018"
 
@@ -14,6 +14,7 @@ tokio = { version = "0.3", features = [
 	"rt-multi-thread",
 	"sync",
 	"io-util",
-	"io-std",
 ]}
 futures = "0.3"
+env_logger = "0.8"
+log = "0.4"
