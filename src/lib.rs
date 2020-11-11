@@ -1,5 +1,5 @@
 use futures::stream::{self, StreamExt};
-use log::{debug, error, info, trace, warn};
+use log::{error, info, trace, warn};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{
     net::{tcp, TcpListener, TcpStream},
@@ -132,23 +132,22 @@ impl NetMgr {
 fn format_data(data: &[u8]) -> String {
     const MAX_WIDTH: usize = 40;
 
+    let mut overflow = false;
     let mut res = String::new();
     res.push('"');
     for c in data {
+        if res.len() >= MAX_WIDTH { overflow = true; break; }
         match *c {
-            b'\n' => res.push_str("\\n"),
-            b'\t' => res.push_str("\\t"),
-            b'\r' => res.push_str("\\r"),
-            c if c < b' ' => res.push_str(&format!("\\x{:02x}", c)),
-            c if c.is_ascii() => res.push(c as char),
+            b'\n' => res.push_str(r"\n"),
+            b'\t' => res.push_str(r"\t"),
+            b'\r' => res.push_str(r"\r"),
+            b'\\' => res.push_str(r"\\"),
+            c if c >= b' ' && c.is_ascii() => res.push(c as char),
             c => res.push_str(&format!("\\x{:02x}", c)),
         }
-        if res.len() >= MAX_WIDTH { break; }
     }
 
     res.push('"');
-    if data.len() > MAX_WIDTH {
-        res.push_str("...");
-    }
+    if overflow { res.push_str("..."); }
     res
 }
